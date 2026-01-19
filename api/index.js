@@ -4392,18 +4392,30 @@ const CACHE_TTL = 1800000; // 30 minutes
 const MAX_CACHE_ENTRIES = 1000;
 
 // ✅ GLOBAL TORRENT CACHE - now uses PostgreSQL for persistence!
-// This cache stores torrent search results (shared across ALL users)
-// Different users with different debrid keys/proxies share this cache
-// Each user's streams are rebuilt with their own config on cache hit
-// Cache is now PERSISTENT in DB - survives restarts and HuggingFace sleep!
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🔄 SWR MODE (Stale-While-Revalidate)
+// Replaces the old global cache with a simpler pattern:
+// 1. ALWAYS search DB first (torrents table) - instant response
+// 2. If results found, return them immediately
+// 3. In background, run live search to find new content
+// 4. Save new content to DB for future searches
+// ═══════════════════════════════════════════════════════════════════════════════
+const SWR_MODE = true; // ✅ Enable Stale-While-Revalidate pattern
+const SWR_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes cooldown between background refreshes for same content
+
+// Track active background refreshes to avoid duplicates
+const activeBackgroundRefreshes = new Map(); // key -> timestamp of last refresh
+
+// OLD CACHE SYSTEM - DISABLED (kept for reference)
+// With SWR, we use the torrents table directly instead of caching search results
 const GLOBAL_CACHE_TTL_MOVIE = 18; // 18 hours TTL for movies (stable content)
 const GLOBAL_CACHE_TTL_SERIES = 10; // 10 hours TTL for series (more dynamic)
-const GLOBAL_CACHE_ENABLED = true;
-const USE_DB_CACHE = true; // ✅ Use PostgreSQL instead of in-memory Map
+const GLOBAL_CACHE_ENABLED = false; // ❌ DISABLED - Using SWR mode instead
+const USE_DB_CACHE = false; // ❌ DISABLED - Using SWR mode instead
 
-// Legacy in-memory cache (fallback if DB fails)
+// Legacy in-memory cache (kept for compatibility but unused with SWR)
 const globalTorrentCache = new Map();
-const GLOBAL_CACHE_TTL = GLOBAL_CACHE_TTL_MOVIE * 60 * 60 * 1000; // Default to movie TTL for in-memory
+const GLOBAL_CACHE_TTL = GLOBAL_CACHE_TTL_MOVIE * 60 * 60 * 1000;
 const MAX_GLOBAL_CACHE_ENTRIES = 200;
 
 function cleanupCache() {
@@ -4445,6 +4457,211 @@ function maybeCleanupCache() {
         );
         lastDbCacheCleanup = now;
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🔄 SWR: Background Refresh Function
+// Runs live search in background (fire-and-forget) to update DB with new torrents
+// ═══════════════════════════════════════════════════════════════════════════════
+async function triggerBackgroundRefresh(params) {
+    const {
+        mediaDetails,
+        type,
+        season,
+        episode,
+        config,
+        searchQueries,
+        italianTitle,
+        originalTitle,
+        kitsuId
+    } = params;
+
+    // Create unique key for this content
+    const imdbId = mediaDetails?.imdbId || 'unknown';
+    const refreshKey = `${type}:${imdbId}${season ? `:${season}:${episode}` : ''}`;
+
+    // Check cooldown - don't refresh if we did it recently
+    const lastRefresh = activeBackgroundRefreshes.get(refreshKey);
+    if (lastRefresh && (Date.now() - lastRefresh) < SWR_COOLDOWN_MS) {
+        const remainingMs = SWR_COOLDOWN_MS - (Date.now() - lastRefresh);
+        console.log(`🔄 [SWR] Skipping background refresh for ${refreshKey} - cooldown (${Math.round(remainingMs / 1000)}s remaining)`);
+        return;
+    }
+
+    // Mark as refreshing
+    activeBackgroundRefreshes.set(refreshKey, Date.now());
+
+    // Cleanup old entries (older than 1 hour)
+    const oneHourAgo = Date.now() - (60 * 60 * 1000);
+    for (const [key, timestamp] of activeBackgroundRefreshes.entries()) {
+        if (timestamp < oneHourAgo) {
+            activeBackgroundRefreshes.delete(key);
+        }
+    }
+
+    console.log(`🔄 [SWR] Starting background refresh for ${refreshKey}...`);
+
+    // Fire-and-forget: run in background without blocking
+    setImmediate(async () => {
+        try {
+            // Build search parameters (simplified version of main flow)
+            const rawResultsByProvider = {
+                UIndex: [],
+                Knaben: [],
+                TorrentGalaxy: [],
+                CorsaroNero: [],
+                ExternalAddons: [],
+                RARBG: []
+            };
+
+            const searchType = kitsuId ? 'anime' : type;
+            const useUIndex = config.use_uindex !== false;
+            const useCorsaroNero = config.use_corsaronero !== false;
+            const useKnaben = config.use_knaben !== false;
+
+            // Helper function to clean title for search
+            const cleanTitleForSearch = (title) => {
+                if (!title) return '';
+                return title
+                    .replace(/[.\-:]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .toLowerCase();
+            };
+
+            const cleanedItalianTitle = italianTitle ? cleanTitleForSearch(italianTitle) : '';
+
+            // Build queries for background search (use first 3 queries only for speed)
+            const limitedQueries = (searchQueries || []).slice(0, 3);
+
+            if (limitedQueries.length === 0) {
+                console.log(`⚠️ [SWR] No search queries for background refresh`);
+                return;
+            }
+
+            // Execute searches (limited to avoid overloading providers)
+            for (const query of limitedQueries) {
+                const searchPromises = [];
+
+                // CorsaroNero
+                if (useCorsaroNero) {
+                    searchPromises.push({
+                        name: 'CorsaroNero',
+                        promise: fetchCorsaroNeroData(query, searchType).catch(e => {
+                            console.warn(`⚠️ [SWR] CorsaroNero error: ${e.message}`);
+                            return [];
+                        })
+                    });
+                }
+
+                // Knaben
+                if (useKnaben) {
+                    const knabenMetadata = {
+                        primaryTitle: mediaDetails?.title,
+                        title: mediaDetails?.title,
+                        titles: mediaDetails?.titles || [mediaDetails?.title],
+                        year: mediaDetails?.year,
+                        imdbId: mediaDetails?.imdbId,
+                        tmdbId: mediaDetails?.tmdbId,
+                    };
+                    const knabenParsedId = {
+                        mediaType: searchType,
+                        season: season,
+                        episode: episode,
+                    };
+                    searchPromises.push({
+                        name: 'Knaben',
+                        promise: fetchKnabenData(query, searchType, knabenMetadata, knabenParsedId).catch(e => {
+                            console.warn(`⚠️ [SWR] Knaben error: ${e.message}`);
+                            return [];
+                        })
+                    });
+                }
+
+                // UIndex
+                if (useUIndex) {
+                    const uindexValidationMetadata = {
+                        titles: mediaDetails?.titles || [mediaDetails?.title, italianTitle, originalTitle].filter(Boolean),
+                        year: mediaDetails?.year,
+                        season: season ? parseInt(season, 10) : undefined,
+                        episode: episode ? parseInt(episode, 10) : undefined,
+                    };
+                    searchPromises.push({
+                        name: 'UIndex',
+                        promise: fetchUIndexData(query, searchType, italianTitle, uindexValidationMetadata).catch(e => {
+                            console.warn(`⚠️ [SWR] UIndex error: ${e.message}`);
+                            return [];
+                        })
+                    });
+                }
+
+                if (searchPromises.length === 0) continue;
+
+                const results = await Promise.allSettled(searchPromises.map(sp => sp.promise));
+
+                results.forEach((result, index) => {
+                    const sourceName = searchPromises[index].name;
+                    if (result.status === 'fulfilled' && result.value && result.value.length > 0) {
+                        if (DEBUG_MODE) console.log(`🔄 [SWR] ${sourceName} returned ${result.value.length} results`);
+                        if (rawResultsByProvider[sourceName]) {
+                            rawResultsByProvider[sourceName].push(...result.value);
+                        }
+                    }
+                });
+
+                // Small delay between queries
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+
+            // Merge all results
+            const allResults = [
+                ...rawResultsByProvider.CorsaroNero,
+                ...rawResultsByProvider.Knaben,
+                ...rawResultsByProvider.UIndex,
+                ...rawResultsByProvider.ExternalAddons,
+                ...rawResultsByProvider.RARBG
+            ];
+
+            if (allResults.length === 0) {
+                console.log(`🔄 [SWR] No new results found for ${refreshKey}`);
+                return;
+            }
+
+            // Filter and save to DB (only Italian torrents)
+            const torrentsToSave = allResults
+                .filter(r => {
+                    if (!r.infoHash) return false;
+                    const title = r.title || r.websiteTitle || '';
+                    const langInfo = getLanguageInfo(title);
+                    const mainAddon = (r.externalAddon || '').split('(')[0].trim().toLowerCase();
+                    const isTrustedProvider = (r.source && /corsaro/i.test(r.source)) ||
+                        (mainAddon && /^torrentio$/i.test(mainAddon));
+                    return langInfo.isItalian || isTrustedProvider;
+                })
+                .map(r => ({
+                    info_hash: r.infoHash.toLowerCase(),
+                    title: r.title || r.websiteTitle || 'Unknown',
+                    provider: r.source || r.externalAddon || 'unknown',
+                    size: r.sizeInBytes || null,
+                    type: type,
+                    seeders: r.seeders || 0,
+                    imdb_id: mediaDetails?.imdbId || null,
+                    tmdb_id: mediaDetails?.tmdbId || null,
+                    upload_date: new Date().toISOString().split('T')[0],
+                    cached_rd: r.cached || false
+                }));
+
+            if (torrentsToSave.length > 0) {
+                const inserted = await dbHelper.batchInsertTorrents(torrentsToSave);
+                console.log(`✅ [SWR] Background refresh saved ${inserted}/${torrentsToSave.length} torrents for ${refreshKey}`);
+            } else {
+                console.log(`🔄 [SWR] No Italian torrents to save for ${refreshKey}`);
+            }
+
+        } catch (error) {
+            console.error(`❌ [SWR] Background refresh failed for ${refreshKey}:`, error.message);
+        }
+    });
 }
 
 // ✅ Enhanced main fetch function
@@ -6237,6 +6454,27 @@ async function handleStream(type, id, config, workerOrigin) {
             finalSearchQueries = [...new Set(searchQueries)];
             if (DEBUG_MODE) console.log(`📚 Final search queries (${finalSearchQueries.length} total):`, finalSearchQueries);
             // --- FINE MODIFICA ---
+
+            // ═══════════════════════════════════════════════════════════════════════════════
+            // 🔄 SWR MODE: Trigger background refresh when serving from DB cache
+            // This runs the live search in background to update DB for future requests
+            // ═══════════════════════════════════════════════════════════════════════════════
+            if (SWR_MODE && skipLiveSearch && dbResults.length > 0 && !config.db_only) {
+                console.log(`🔄 [SWR] Serving ${dbResults.length} results from DB. Triggering background refresh...`);
+
+                // Fire-and-forget: don't await, let it run in background
+                triggerBackgroundRefresh({
+                    mediaDetails,
+                    type,
+                    season,
+                    episode,
+                    config,
+                    searchQueries: finalSearchQueries,
+                    italianTitle,
+                    originalTitle,
+                    kitsuId
+                });
+            }
 
             // --- NUOVA LOGICA DI AGGREGAZIONE E DEDUPLICAZIONE ---
             // Separazione dei risultati per provider per applicare filtri specifici
