@@ -771,13 +771,44 @@
                     </div>
                 </details>
 
-                <!-- Options: Full ITA - Wrapped in search-sites for styling -->
-                <div class="search-sites">
-                    <label style="background: rgba(0, 128, 0, 0.15); border-color: rgba(0, 200, 83, 0.4);">
-                        <input type="checkbox" id="full_ita">
-                        <span>🇮🇹 FULL ITA (Solo risultati con "ITA" nel nome)</span>
-                    </label>
-                </div>
+                <!-- Language Filter (Multi-select) -->
+                <details id="language_filter_details"
+                    style="margin-top: 15px; background: rgba(0,100,0,0.1); border-radius: 6px; border: 1px solid rgba(0,200,83,0.3);">
+                    <summary
+                        style="padding: 10px; cursor: pointer; font-weight: bold; font-size: 0.9em; user-select: none; color: #4ade80;">
+                        🌍 Filtro Lingue (Clicca per espandere)</summary>
+                    <div style="padding: 10px; border-top: 1px solid rgba(0,200,83,0.2);">
+                        <small style="display: block; margin-bottom: 10px; color: #9ca3af;">
+                            Seleziona le lingue che vuoi vedere. Se nessuna è selezionata, mostra tutto.
+                        </small>
+                        <div class="search-sites">
+                            <label style="background: rgba(0, 128, 0, 0.15); border-color: rgba(0, 200, 83, 0.4);">
+                                <input type="checkbox" id="lang_ita">
+                                <span>🇮🇹 Italiano</span>
+                            </label>
+                            <label style="background: rgba(0, 100, 180, 0.15); border-color: rgba(100, 150, 255, 0.4);">
+                                <input type="checkbox" id="lang_eng">
+                                <span>🇬🇧 English</span>
+                            </label>
+                            <label style="background: rgba(0, 50, 150, 0.15); border-color: rgba(50, 100, 200, 0.4);">
+                                <input type="checkbox" id="lang_fra">
+                                <span>🇫🇷 Français</span>
+                            </label>
+                            <label style="background: rgba(200, 150, 0, 0.15); border-color: rgba(255, 200, 50, 0.4);">
+                                <input type="checkbox" id="lang_ger">
+                                <span>🇩🇪 Deutsch</span>
+                            </label>
+                            <label style="background: rgba(200, 100, 0, 0.15); border-color: rgba(255, 150, 50, 0.4);">
+                                <input type="checkbox" id="lang_spa">
+                                <span>🇪🇸 Español</span>
+                            </label>
+                            <label style="background: rgba(128, 0, 128, 0.15); border-color: rgba(180, 100, 180, 0.4);">
+                                <input type="checkbox" id="lang_multi">
+                                <span>🌐 Multi (più lingue)</span>
+                            </label>
+                        </div>
+                    </div>
+                </details>
             </div>
         </div>
 
@@ -1011,7 +1042,13 @@
             const useMediaFusionCheckbox = document.getElementById("use_mediafusion");
             const useCometCheckbox = document.getElementById("use_comet");
             const useRarbgCheckbox = document.getElementById("use_rarbg");
-            const fullItaCheckbox = document.getElementById("full_ita");
+            // Language filter checkboxes
+            const langItaCheckbox = document.getElementById("lang_ita");
+            const langEngCheckbox = document.getElementById("lang_eng");
+            const langFraCheckbox = document.getElementById("lang_fra");
+            const langGerCheckbox = document.getElementById("lang_ger");
+            const langSpaCheckbox = document.getElementById("lang_spa");
+            const langMultiCheckbox = document.getElementById("lang_multi");
             const useMaxResLimitCheckbox = document.getElementById("use_max_res_limit");
             const maxResLimitSelect = document.getElementById("max_res_limit");
 
@@ -1113,7 +1150,19 @@
                 config.use_mediafusion = useMediaFusionCheckbox.checked;
                 config.use_comet = useCometCheckbox.checked;
                 config.use_rarbg = useRarbgCheckbox.checked;
-                config.full_ita = fullItaCheckbox.checked;
+
+                // Language filter (array of selected languages)
+                const selectedLanguages = [];
+                if (langItaCheckbox.checked) selectedLanguages.push('ita');
+                if (langEngCheckbox.checked) selectedLanguages.push('eng');
+                if (langFraCheckbox.checked) selectedLanguages.push('fra');
+                if (langGerCheckbox.checked) selectedLanguages.push('ger');
+                if (langSpaCheckbox.checked) selectedLanguages.push('spa');
+                if (langMultiCheckbox.checked) selectedLanguages.push('multi');
+                if (selectedLanguages.length > 0) {
+                    config.languages = selectedLanguages;
+                }
+
                 config.only_debrid_cache = document.getElementById('only_debrid_cache').checked;
 
                 // Max Resolution Limit (only if checkbox is checked)
@@ -1202,7 +1251,20 @@
 
                 // Feature icons (no separator)
                 let featureEmojis = '';
-                if (config.full_ita) featureEmojis += '🇮🇹';
+                if (config.languages && config.languages.length > 0) {
+                    // Show flag emojis for selected languages
+                    const langFlags = {
+                        'ita': '🇮🇹',
+                        'eng': '🇬🇧',
+                        'fra': '🇫🇷',
+                        'ger': '🇩🇪',
+                        'spa': '🇪🇸',
+                        'multi': '🌐'
+                    };
+                    config.languages.forEach(lang => {
+                        if (langFlags[lang]) featureEmojis += langFlags[lang];
+                    });
+                }
                 if (config.introskip_enabled) featureEmojis += '⏩';
 
                 // Build status emoji string
@@ -1347,9 +1409,17 @@
                         const el = document.getElementById('use_rarbg');
                         if (el) el.checked = cfg.use_rarbg;
                     }
-                    if (cfg.full_ita !== undefined) {
-                        const el = document.getElementById('full_ita');
-                        if (el) el.checked = cfg.full_ita;
+                    // Load language filter (new format: languages array)
+                    if (cfg.languages && Array.isArray(cfg.languages)) {
+                        cfg.languages.forEach(lang => {
+                            const el = document.getElementById('lang_' + lang);
+                            if (el) el.checked = true;
+                        });
+                    }
+                    // Backwards compatibility: convert old full_ita to new format
+                    if (cfg.full_ita === true && !cfg.languages) {
+                        const el = document.getElementById('lang_ita');
+                        if (el) el.checked = true;
                     }
                     if (cfg.only_debrid_cache !== undefined) {
                         const el = document.getElementById('only_debrid_cache');
@@ -1463,9 +1533,13 @@
             useMediaFusionCheckbox.addEventListener('change', updateInstallLink);
             useCometCheckbox.addEventListener('change', updateInstallLink);
             useRarbgCheckbox.addEventListener('change', updateInstallLink);
-            fullItaCheckbox.addEventListener('change', updateInstallLink);
-            dbOnlyCheckbox.addEventListener('change', updateInstallLink);
-            useGlobalCacheCheckbox.addEventListener('change', updateInstallLink);
+            // Language filter listeners
+            langItaCheckbox.addEventListener('change', updateInstallLink);
+            langEngCheckbox.addEventListener('change', updateInstallLink);
+            langFraCheckbox.addEventListener('change', updateInstallLink);
+            langGerCheckbox.addEventListener('change', updateInstallLink);
+            langSpaCheckbox.addEventListener('change', updateInstallLink);
+            langMultiCheckbox.addEventListener('change', updateInstallLink);
             document.getElementById('only_debrid_cache').addEventListener('change', updateInstallLink);
 
             // Advanced Filters Listeners
@@ -1484,8 +1558,6 @@
             useMediaFusionCheckbox.addEventListener('change', updateInstallLink);
             useCometCheckbox.addEventListener('change', updateInstallLink);
             useRarbgCheckbox.addEventListener('change', updateInstallLink);
-            fullItaCheckbox.addEventListener('change', updateInstallLink);
-            useGlobalCacheCheckbox.addEventListener('change', updateInstallLink);
             useMaxResLimitCheckbox.addEventListener('change', updateInstallLink);
             maxResLimitSelect.addEventListener('change', updateInstallLink);
 
@@ -1591,10 +1663,14 @@
                 useCometCheckbox.checked = true;
                 useRarbgCheckbox.checked = true;
 
-                dbOnlyCheckbox.checked = false;
-                fullItaCheckbox.checked = false;
+                // Clear language filters for full search
+                langItaCheckbox.checked = false;
+                langEngCheckbox.checked = false;
+                langFraCheckbox.checked = false;
+                langGerCheckbox.checked = false;
+                langSpaCheckbox.checked = false;
+                langMultiCheckbox.checked = false;
 
-                updateProviderState(); // Enable checkboxes
                 updateInstallLink();
 
                 // Visual feedback
@@ -1609,12 +1685,14 @@
             });
 
             document.getElementById('preset_install_2').addEventListener('click', (e) => {
-                // Installazione 2: DB Only ON, Full ITA ON, Global Cache ON
-                dbOnlyCheckbox.checked = true;
-                fullItaCheckbox.checked = true;
-                useGlobalCacheCheckbox.checked = true;
+                // Installazione 2: Italian only mode
+                langItaCheckbox.checked = true;
+                langEngCheckbox.checked = false;
+                langFraCheckbox.checked = false;
+                langGerCheckbox.checked = false;
+                langSpaCheckbox.checked = false;
+                langMultiCheckbox.checked = true; // Multi often includes Italian
 
-                updateProviderState(); // Disable provider checkboxes (grey out)
                 updateInstallLink();
 
                 // Visual feedback
@@ -1623,8 +1701,9 @@
                 btn.textContent = "✅ Applicato!";
                 setTimeout(() => btn.textContent = originalText, 1500);
 
-                // Open dropdown
-                if (sitesDetails) sitesDetails.open = true;
+                // Open language filter
+                const langDetails = document.getElementById('language_filter_details');
+                if (langDetails) langDetails.open = true;
                 e.stopPropagation(); // Prevent immediate closing
             });
 
