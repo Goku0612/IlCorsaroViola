@@ -8370,35 +8370,58 @@ async function handleStream(type, id, config, workerOrigin) {
             }
         }
 
-        // ✅ FULL ITA MODE: Only show results with "ITA" in title (except CorsaroNero and Torrentio DIRECT addon)
-        if (config.full_ita) {
+        // ✅ LANGUAGE FILTER: Filter by user-selected languages
+        // Supports: ita, eng, fra, ger, spa, multi
+        // If no languages selected, show all results
+        const selectedLanguages = config.languages || [];
+
+        // Backwards compatibility: if full_ita is set but languages isn't, treat as ITA only
+        if (config.full_ita && selectedLanguages.length === 0) {
+            selectedLanguages.push('ita');
+        }
+
+        if (selectedLanguages.length > 0) {
             const exemptProviders = ['corsaro', 'ilcorsaronero', 'corsaronero', 'torrentio'];
             const beforeCount = filteredResults.length;
 
+            // Language detection patterns
+            const languagePatterns = {
+                ita: /\bita\b|italian|italiano/i,
+                eng: /\beng\b|english|\benglish\b/i,
+                fra: /\bfra\b|\bfre\b|french|fran[çc]ais/i,
+                ger: /\bger\b|\bdeu\b|german|deutsch/i,
+                spa: /\bspa\b|spanish|espa[ñn]ol/i,
+                multi: /\bmulti\b|dual|multiple/i
+            };
+
             filteredResults = filteredResults.filter(result => {
                 const provider = (result.source || result.externalAddon || '').toLowerCase();
-
-                // Extract MAIN provider only (before parentheses) to avoid false positives
-                // e.g., "comet (torrentio)" → "comet" (NOT exempt)
-                // e.g., "torrentio" → "torrentio" (exempt)
                 const mainProvider = provider.split('(')[0].trim();
 
                 // Exempt providers: Only DIRECT CorsaroNero and Torrentio addons
                 const isExempt = exemptProviders.some(exempt => mainProvider.includes(exempt));
                 if (isExempt) return true;
 
-                // For all other providers, check for strict ITA in title
                 const title = (result.title || result.websiteTitle || '').toLowerCase();
-                const hasIta = /\bita\b|italian|italiano/i.test(title);
 
-                if (!hasIta) {
-                    console.log(`🇮🇹 [FULL ITA] Filtered out: "${(result.title || '').substring(0, 50)}..." (${provider})`);
+                // Check if title matches any of the selected languages
+                const matchesLanguage = selectedLanguages.some(lang => {
+                    const pattern = languagePatterns[lang];
+                    return pattern && pattern.test(title);
+                });
+
+                if (!matchesLanguage) {
+                    console.log(`🌍 [LANG FILTER] Filtered out: "${(result.title || '').substring(0, 50)}..." (no ${selectedLanguages.join('/')})`);
                 }
 
-                return hasIta;
+                return matchesLanguage;
             });
 
-            console.log(`🇮🇹 [FULL ITA] Filtered ${beforeCount} → ${filteredResults.length} results (strict ITA mode)`);
+            const langFlags = selectedLanguages.map(l => {
+                const flags = { ita: '🇮🇹', eng: '🇬🇧', fra: '🇫🇷', ger: '🇩🇪', spa: '🇪🇸', multi: '🌐' };
+                return flags[l] || l;
+            }).join('');
+            console.log(`🌍 [LANG FILTER] ${langFlags} Filtered ${beforeCount} → ${filteredResults.length} results`);
         }
 
         // Limit results for performance (after all filters)
