@@ -771,20 +771,11 @@
                     </div>
                 </details>
 
-                <!-- Options: DB Only, Full ITA, Cache - Wrapped in search-sites for styling -->
+                <!-- Options: Full ITA - Wrapped in search-sites for styling -->
                 <div class="search-sites">
-                    <label style="background: rgba(0, 100, 200, 0.15); border-color: rgba(100, 150, 255, 0.4);">
-                        <input type="checkbox" id="db_only">
-                        <span>💾 Ricerca Solo DB (Ultra-veloce, no live search)</span>
-                    </label>
                     <label style="background: rgba(0, 128, 0, 0.15); border-color: rgba(0, 200, 83, 0.4);">
                         <input type="checkbox" id="full_ita">
                         <span>🇮🇹 FULL ITA (Solo risultati con "ITA" nel nome)</span>
-                    </label>
-
-                    <label style="background: rgba(100, 100, 200, 0.15); border-color: rgba(150, 150, 255, 0.4);">
-                        <input type="checkbox" id="use_global_cache" checked>
-                        <span>💾 Usa Cache Globale (Ricerche più veloci, condivise)</span>
                     </label>
                 </div>
             </div>
@@ -1021,8 +1012,6 @@
             const useCometCheckbox = document.getElementById("use_comet");
             const useRarbgCheckbox = document.getElementById("use_rarbg");
             const fullItaCheckbox = document.getElementById("full_ita");
-            const dbOnlyCheckbox = document.getElementById("db_only");
-            const useGlobalCacheCheckbox = document.getElementById("use_global_cache");
             const useMaxResLimitCheckbox = document.getElementById("use_max_res_limit");
             const maxResLimitSelect = document.getElementById("max_res_limit");
 
@@ -1057,37 +1046,6 @@
                 maxResLimitSelect.disabled = !useMaxResLimitCheckbox.checked;
                 updateInstallLink();
             });
-
-            // Disable/gray-out provider checkboxes when db_only is active
-            function updateProviderState() {
-                const isDbOnly = dbOnlyCheckbox.checked;
-                const providerCheckboxes = [
-                    useCorsaroNeroCheckbox,
-                    useUIndexCheckbox,
-                    useKnabenCheckbox,
-                    useTorrentGalaxyCheckbox,
-                    useTorrentioCheckbox,
-                    useMediaFusionCheckbox,
-                    useCometCheckbox,
-                    useRarbgCheckbox
-                ];
-
-                providerCheckboxes.forEach(checkbox => {
-                    if (checkbox) {
-                        checkbox.disabled = isDbOnly;
-                        checkbox.parentElement.style.opacity = isDbOnly ? '0.5' : '1';
-                        checkbox.parentElement.style.pointerEvents = isDbOnly ? 'none' : 'auto';
-                    }
-                });
-            }
-
-            dbOnlyCheckbox.addEventListener('change', () => {
-                updateProviderState();
-                updateInstallLink();
-            });
-
-            // Initialize provider state on page load
-            updateProviderState();
 
 
             function updateInstallLink() {
@@ -1156,8 +1114,6 @@
                 config.use_comet = useCometCheckbox.checked;
                 config.use_rarbg = useRarbgCheckbox.checked;
                 config.full_ita = fullItaCheckbox.checked;
-                config.db_only = dbOnlyCheckbox.checked;
-                config.use_global_cache = useGlobalCacheCheckbox.checked;
                 config.only_debrid_cache = document.getElementById('only_debrid_cache').checked;
 
                 // Max Resolution Limit (only if checkbox is checked)
@@ -1214,9 +1170,9 @@
                 if (config.use_comet) searchSites.push("Comet");
                 if (config.use_rarbg) searchSites.push("RARBG");
 
-                if (searchSites.length === 0 && !config.db_only) {
-                    // No search sites selected and not in DB Only mode - show error
-                    statusEl.textContent = "❌ Seleziona almeno un sito per la ricerca (o abilita 'Ricerca Solo DB')";
+                if (searchSites.length === 0) {
+                    // No search sites selected - show error
+                    statusEl.textContent = "❌ Seleziona almeno un sito per la ricerca";
                     statusEl.style.color = '#FF6B6B';
                     linkContainer.classList.remove('show');
                     installButton.disabled = true;
@@ -1246,7 +1202,6 @@
 
                 // Feature icons (no separator)
                 let featureEmojis = '';
-                if (config.db_only) featureEmojis += '⚡';
                 if (config.full_ita) featureEmojis += '🇮🇹';
                 if (config.introskip_enabled) featureEmojis += '⏩';
 
@@ -1265,10 +1220,9 @@
                 if (config.mediaflow_url) services.push("MediaFlow");
                 if (config.jackett_url) services.push("Jackettio");
 
-                const dbOnlyText = config.db_only ? ' [DB Only]' : '';
                 const serviceText = services.length > 0 ? ` (${services.join(', ')})` : ' (Solo P2P)';
                 const searchText = searchSites.length > 0 ? ` | Siti: ${searchSites.join(', ')}` : '';
-                statusEl.textContent = `✓ ${statusEmojis} Configurazione pronta${dbOnlyText}${serviceText}${searchText}`;
+                statusEl.textContent = `✓ ${statusEmojis} Configurazione pronta${serviceText}${searchText}`;
                 statusEl.style.color = '#4EC9B0';
             }
 
@@ -1396,14 +1350,6 @@
                     if (cfg.full_ita !== undefined) {
                         const el = document.getElementById('full_ita');
                         if (el) el.checked = cfg.full_ita;
-                    }
-                    if (cfg.db_only !== undefined) {
-                        const el = document.getElementById('db_only');
-                        if (el) el.checked = cfg.db_only;
-                    }
-                    if (cfg.use_global_cache !== undefined) {
-                        const el = document.getElementById('use_global_cache');
-                        if (el) el.checked = cfg.use_global_cache;
                     }
                     if (cfg.only_debrid_cache !== undefined) {
                         const el = document.getElementById('only_debrid_cache');
