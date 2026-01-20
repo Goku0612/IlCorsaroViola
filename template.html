@@ -705,30 +705,6 @@
                 <div class="section-title">🔎 Siti di Ricerca Torrent</div>
                 <small>Seleziona su quali siti cercare i torrent:</small>
 
-                <!-- Configurazioni Consigliate -->
-                <div
-                    style="margin: 15px 0; padding: 10px; background: rgba(255, 0, 0, 0.1); border: 1px solid rgba(255, 0, 0, 0.3); border-radius: 8px; text-align: center;">
-                    <div
-                        style="color: #ff4444; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; font-size: 0.9em;">
-                        !!! Configurazioni Consigliate !!!
-                    </div>
-                    <div style="margin-bottom: 15px; display: flex; justify-content: center; align-items: center; gap: 5px; cursor: pointer;"
-                        id="info_btn" title="Info Doppia Installazione">
-                        <span style="font-weight: bold; font-size: 0.8em; color: #a78bfa;">INFO</span>
-                        <span style="font-size: 1.2em;">📖</span>
-                    </div>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button type="button" id="preset_install_1"
-                            style="flex: 1; min-width: 140px; font-size: 0.9em; padding: 8px; background: linear-gradient(135deg, #4f46e5, #4338ca);">
-                            Installazione 1
-                        </button>
-                        <button type="button" id="preset_install_2"
-                            style="flex: 1; min-width: 140px; font-size: 0.9em; padding: 8px; background: linear-gradient(135deg, #059669, #047857);">
-                            Installazione 2
-                        </button>
-                    </div>
-                </div>
-
                 <!-- Collapsible Search Sites -->
                 <details id="sites_details"
                     style="margin-bottom: 15px; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);">
@@ -1649,77 +1625,6 @@
                 }, 3000);
             });
 
-            // Recommended Configurations Presets
-            const sitesDetails = document.getElementById('sites_details');
-
-            document.getElementById('preset_install_1').addEventListener('click', (e) => {
-                // Installazione 1: All providers ON, DB Only OFF, Full ITA OFF
-                useCorsaroNeroCheckbox.checked = true;
-                useUIndexCheckbox.checked = false;
-                useKnabenCheckbox.checked = true;
-                useTorrentGalaxyCheckbox.checked = true;
-                useTorrentioCheckbox.checked = true;
-                useMediaFusionCheckbox.checked = true;
-                useCometCheckbox.checked = true;
-                useRarbgCheckbox.checked = true;
-
-                // Clear language filters for full search
-                langItaCheckbox.checked = false;
-                langEngCheckbox.checked = false;
-                langFraCheckbox.checked = false;
-                langGerCheckbox.checked = false;
-                langSpaCheckbox.checked = false;
-                langMultiCheckbox.checked = false;
-
-                updateInstallLink();
-
-                // Visual feedback
-                const btn = document.getElementById('preset_install_1');
-                const originalText = btn.textContent;
-                btn.textContent = "✅ Applicato!";
-                setTimeout(() => btn.textContent = originalText, 1500);
-
-                // Open dropdown
-                if (sitesDetails) sitesDetails.open = true;
-                e.stopPropagation(); // Prevent immediate closing
-            });
-
-            document.getElementById('preset_install_2').addEventListener('click', (e) => {
-                // Installazione 2: Italian only mode
-                langItaCheckbox.checked = true;
-                langEngCheckbox.checked = false;
-                langFraCheckbox.checked = false;
-                langGerCheckbox.checked = false;
-                langSpaCheckbox.checked = false;
-                langMultiCheckbox.checked = true; // Multi often includes Italian
-
-                updateInstallLink();
-
-                // Visual feedback
-                const btn = document.getElementById('preset_install_2');
-                const originalText = btn.textContent;
-                btn.textContent = "✅ Applicato!";
-                setTimeout(() => btn.textContent = originalText, 1500);
-
-                // Open language filter
-                const langDetails = document.getElementById('language_filter_details');
-                if (langDetails) langDetails.open = true;
-                e.stopPropagation(); // Prevent immediate closing
-            });
-
-            // Close dropdown when clicking outside
-            document.addEventListener('click', (event) => {
-                if (sitesDetails && sitesDetails.open) {
-                    const isClickInside = sitesDetails.contains(event.target);
-                    const isPresetBtn1 = document.getElementById('preset_install_1').contains(event.target);
-                    const isPresetBtn2 = document.getElementById('preset_install_2').contains(event.target);
-
-                    if (!isClickInside && !isPresetBtn1 && !isPresetBtn2) {
-                        sitesDetails.open = false;
-                    }
-                }
-            });
-
             // Initial call to enable buttons
             updateInstallLink();
 
@@ -1814,70 +1719,6 @@
                 requestAnimationFrame(animate);
                 uniforms.u_time.value = time * 0.001;
                 renderer.render(scene, camera);
-            }
-        </script>
-        <!-- Info Modal -->
-        <div id="info_modal"
-            style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.8); backdrop-filter: blur(5px);">
-            <div
-                style="background-color: #1a1a2e; margin: 10% auto; padding: 25px; border: 1px solid #7c3aed; width: 80%; max-width: 600px; border-radius: 12px; color: #e0e0e0; box-shadow: 0 0 20px rgba(124, 58, 237, 0.5);">
-                <div
-                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px;">
-                    <h3 style="margin: 0; color: #a78bfa;">📖 Guida alla Doppia Installazione</h3>
-                    <span id="info_close_btn"
-                        style="color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 1;">&times;</span>
-                </div>
-
-                <p style="font-size: 0.95em; line-height: 1.5;">
-                    Per ottenere il massimo, ti consigliamo di installare l'addon <strong>due volte</strong> con
-                    queste configurazioni:
-                </p>
-
-                <div
-                    style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 8px;">
-                    <strong style="color: #4f46e5; display: block; margin-bottom: 5px;">🔹 Installazione 1: "Crawler
-                        & Aggiornamento"</strong>
-                    <em style="display: block; font-size: 0.9em; margin-bottom: 5px; color: #ccc;">Obiettivo: Non
-                        perdere nessun risultato.</em>
-                    Esegue una ricerca <strong>Live</strong> su tutti i siti. È essenziale per trovare <strong>nuove
-                        uscite</strong> (ancora non nel DB) e per popolare il database stesso.<br>
-                    <span style="font-size: 0.85em; color: #fbbf24;">⚠️ Essendo più lenta, usala come "Seconda
-                        Scelta" o tienila fuori da AIOStreams.</span>
-                </div>
-
-                <div
-                    style="margin-bottom: 15px; padding: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 8px;">
-                    <strong style="color: #059669; display: block; margin-bottom: 5px;">🔹 Installazione 2: "Solo DB
-                        & Accuratezza"</strong>
-                    <em style="display: block; font-size: 0.9em; margin-bottom: 5px; color: #ccc;">Obiettivo:
-                        Risposta veloce ma PRECISA.</em>
-                    Utilizza i dati raccolti dall'Installazione 1. Impiega qualche millisecondo in più per
-                    <strong>verificare accuratamente Pack e Cache</strong>, garantendoti risultati validi e pronti
-                    allo streaming.<br>
-                    <span style="font-size: 0.85em; color: #34d399;">✅ Questa dovrebbe essere la tua "Prima Scelta"
-                        e quella da usare in AIOStreams.</span>
-                </div>
-            </div>
-        </div>
-
-        <script>
-            // Modal Logic
-            const modal = document.getElementById("info_modal");
-            const btn = document.getElementById("info_btn");
-            const span = document.getElementById("info_close_btn");
-
-            if (btn && modal && span) {
-                btn.onclick = function () {
-                    modal.style.display = "flex"; // Use flex to center with existing CSS margin
-                }
-                span.onclick = function () {
-                    modal.style.display = "none";
-                }
-                window.onclick = function (event) {
-                    if (event.target == modal) {
-                        modal.style.display = "none";
-                    }
-                }
             }
         </script>
 </body>
