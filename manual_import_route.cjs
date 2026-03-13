@@ -2480,8 +2480,31 @@ async function getSeedersFromDHT(infoHash, timeoutMs = 5000) {
     const { default: DHT } = await import('bittorrent-dht');
 
     return new Promise((resolve) => {
-        const dht = new DHT();
+        let dht;
+        try {
+            dht = new DHT();
+        } catch (e) {
+            console.warn(`⚠️ [DHT] Failed to create DHT instance: ${e.message}`);
+            return resolve(0);
+        }
+
         const peers = new Set();
+        let resolved = false;
+
+        // ✅ MEMORY FIX: Centralized cleanup to guarantee dht.destroy() is always called
+        const cleanup = () => {
+            if (!resolved) {
+                resolved = true;
+                try { dht.destroy(); } catch (_) {}
+            }
+        };
+
+        // ✅ MEMORY FIX: Handle DHT errors (previously missing → leaked DHT instance on error)
+        dht.on('error', (err) => {
+            console.warn(`⚠️ [DHT] Error: ${err.message}`);
+            cleanup();
+            resolve(0);
+        });
 
         dht.on('peer', (peer, hash) => {
             peers.add(`${peer.host}:${peer.port} `);
@@ -2494,7 +2517,7 @@ async function getSeedersFromDHT(infoHash, timeoutMs = 5000) {
 
         setTimeout(() => {
             const count = peers.size;
-            dht.destroy();
+            cleanup();
             resolve(count);
         }, timeoutMs);
     });
