@@ -293,8 +293,13 @@ const RD_QUEUE_DELAY = 2000; // 2s minimum gap between background RD calls
  * Returns a promise that resolves with the function's result.
  * Background-only — never call from foreground path.
  */
+const MAX_RD_QUEUE_SIZE = 200; // ✅ MEMORY FIX: Prevent unbounded queue growth
 const enqueueRdCall = (asyncFn) => {
     return new Promise((resolve, reject) => {
+        if (_rdQueue.length >= MAX_RD_QUEUE_SIZE) {
+            console.warn(`⚠️ [RD Queue] Queue full (${MAX_RD_QUEUE_SIZE} items), rejecting request`);
+            return reject(new Error('RD queue full, try again later'));
+        }
         _rdQueue.push({ fn: asyncFn, resolve, reject });
         console.log(`🔒 [RD Queue] Enqueued call (${_rdQueue.length} pending, running=${_rdQueueRunning})`);
         if (!_rdQueueRunning) {
@@ -345,10 +350,15 @@ const bgJobQueue = [];
  * - Unlimited queue (all jobs will be processed eventually)
  * - Individual jobs skip unnecessary DB writes internally (e.g. insertEpisodeFiles skip-check)
  */
+const MAX_BG_QUEUE_SIZE = 100; // ✅ MEMORY FIX: Prevent unbounded queue growth
 const enqueueBgJob = (options) => {
     if (activeBgJobs < MAX_CONCURRENT_BG_JOBS) {
         _startBgJob(options);
     } else {
+        if (bgJobQueue.length >= MAX_BG_QUEUE_SIZE) {
+            console.warn(`⚠️ [BG Queue] Queue full (${MAX_BG_QUEUE_SIZE} items), dropping oldest job`);
+            bgJobQueue.shift();
+        }
         bgJobQueue.push(options);
         console.log(`⏳ [BG Queue] Job queued (${activeBgJobs}/${MAX_CONCURRENT_BG_JOBS} active, ${bgJobQueue.length} queued)`);
     }
@@ -1045,6 +1055,14 @@ const decodeBase64Url = (input) => {
 };
 
 const _k = new Map();
+
+// ✅ MEMORY FIX: Prevent _k from growing indefinitely (24h TTL per entry)
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, ts] of _k) {
+        if (now - ts > 24 * 60 * 60 * 1000) _k.delete(key);
+    }
+}, 60 * 60 * 1000); // Hourly cleanup
 
 // ✅ Improved HTML Entity Decoder
 function decodeHtmlEntities(text) {
