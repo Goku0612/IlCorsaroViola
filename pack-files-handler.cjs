@@ -20,6 +20,23 @@ const DEBUG_MODE = process.env.DEBUG_MODE === 'true';
 const _multiSeasonLookupCache = new Map();
 const MULTI_SEASON_LOOKUP_TTL = 30 * 60 * 1000; // 30 minutes
 
+// ✅ MEMORY FIX: Periodic cleanup for _multiSeasonLookupCache (entries were never deleted)
+const MAX_MULTI_SEASON_CACHE_SIZE = 2000;
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, timestamp] of _multiSeasonLookupCache) {
+        if (now - timestamp > MULTI_SEASON_LOOKUP_TTL) {
+            _multiSeasonLookupCache.delete(key);
+        }
+    }
+    if (_multiSeasonLookupCache.size > MAX_MULTI_SEASON_CACHE_SIZE) {
+        const entries = [..._multiSeasonLookupCache.entries()].sort((a, b) => a[1] - b[1]);
+        const toRemove = entries.slice(0, entries.length - MAX_MULTI_SEASON_CACHE_SIZE);
+        for (const [key] of toRemove) _multiSeasonLookupCache.delete(key);
+    }
+    if (_multiSeasonLookupCache.size > 0) console.log(`🧹 [PACK] Cache cleanup: ${_multiSeasonLookupCache.size} entries remaining`);
+}, 5 * 60 * 1000); // Every 5 minutes
+
 // Video file extensions
 const VIDEO_EXTENSIONS = /\.(mkv|mp4|avi|mov|wmv|flv|webm|m4v|ts|m2ts|mpg|mpeg)$/i;
 
