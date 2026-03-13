@@ -23,6 +23,24 @@ try {
 // Simple in-memory cache for byte offsets
 const offsetCache = new Map();
 
+// ✅ MEMORY FIX: Periodic cleanup for offsetCache (was never cleaned)
+const MAX_OFFSET_CACHE_SIZE = 500;
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of offsetCache) {
+        if (now - entry.timestamp > CACHE_TTL_MS) {
+            offsetCache.delete(key);
+        }
+    }
+    // Hard limit: evict oldest if still too large
+    if (offsetCache.size > MAX_OFFSET_CACHE_SIZE) {
+        const entries = [...offsetCache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
+        const toRemove = entries.slice(0, entries.length - MAX_OFFSET_CACHE_SIZE);
+        for (const [key] of toRemove) offsetCache.delete(key);
+    }
+    if (offsetCache.size > 0) console.log(`🧹 [HLS] Cache cleanup: ${offsetCache.size} entries remaining`);
+}, 5 * 60 * 1000); // Every 5 minutes
+
 // ==================== Helpers ====================
 
 /**
@@ -265,6 +283,10 @@ async function handleHlsProxy(req, res) {
 
     const streamUrl = decodeURIComponent(stream);
 
+    // ✅ MEMORY FIX: Track client disconnect to abort expensive work (ffprobe)
+    let clientDisconnected = false;
+    req.on('close', () => { clientDisconnected = true; });
+
     if (!isSafeUrl(streamUrl)) {
         return res.status(400).send('Invalid or unsafe stream URL');
     }
@@ -288,6 +310,9 @@ async function handleHlsProxy(req, res) {
         const totalLength = details.contentLength;
 
         console.log(`⏩ [HLS] Stream: ${finalUrl.slice(-40)}, Length: ${totalLength || 'Unknown'}`);
+
+        // ✅ MEMORY FIX: Skip expensive work if client already disconnected
+        if (clientDisconnected) return;
 
         // Get byte offset for intro end
         console.log(`⏩ [HLS] Calculating byte offset for ${introEnd}s...`);
@@ -318,6 +343,7 @@ async function handleHlsProxy(req, res) {
             manifest = generateSkipManifest(finalUrl, totalLength, introEndOffset);
         } else {
             // Intro starts after 0, need splice manifest
+            if (clientDisconnected) return; // ✅ MEMORY FIX
             console.log(`⏩ [HLS] Calculating byte offset for intro start ${introStart}s...`);
             const startResult = await getByteOffset(finalUrl, introStart);
             const introStartOffset = startResult.offset;
