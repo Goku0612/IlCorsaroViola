@@ -24,8 +24,6 @@ const customFormatter = require('../formatter.cjs');
 import { fetchExternalAddonsFlat, EXTERNAL_ADDONS } from './external-addons.js';
 // ⛩️ Kitsu Plus catalog integration
 import { fetchKitsuPlusCatalog, isKitsuPlusSearchCatalog } from './kitsu-plus.js';
-// 📺 StreamingCommunity integration
-import { fetchStreamingCommunityStreams } from './streaming-community.js';
 
 // 🚀 SEEDER UPDATE WEBHOOK HELPER
 const TRIGGER_SEEDER_UPDATE_URL = process.env.SEEDER_UPDATE_URL; // e.g. 'http://my-vps-ip:3005/update'
@@ -8615,7 +8613,7 @@ async function handleStream(type, id, config, workerOrigin) {
             }
 
             if (!results || results.length === 0) {
-                const hasFallbackStreams = !!streamVixPromise || config.streamingcommunity_enabled === true;
+                const hasFallbackStreams = !!streamVixPromise;
                 if (!hasFallbackStreams) {
                     if (DEBUG_MODE) console.log('❌ No results found from any source after all fallbacks');
                     return { streams: [] };
@@ -9617,7 +9615,7 @@ async function handleStream(type, id, config, workerOrigin) {
         const skipDebridChecks = hashes.length === 0;
 
         if (skipDebridChecks) {
-            const hasFallbackStreams = !!streamVixPromise || config.streamingcommunity_enabled === true;
+            const hasFallbackStreams = !!streamVixPromise;
             if (!hasFallbackStreams) {
                 console.log('❌ No valid info hashes found and no fallback streams enabled');
                 return { streams: [] };
@@ -11038,8 +11036,19 @@ async function handleStream(type, id, config, workerOrigin) {
                 if (svStreams.length > 0) {
                     console.log(`⛩️ [StreamVix] Got ${svStreams.length} anime streams`);
 
+                    // Filter out AnimeUnity streams
+                    const filteredSvStreams = svStreams.filter(sv => {
+                        const isAnimeUnity = sv.behaviorHints?.bingeGroup?.includes('animeunity') ||
+                            sv.name?.toLowerCase().includes('anime unity') ||
+                            sv.name?.toLowerCase().includes('animeunity');
+                        if (isAnimeUnity) console.log(`⛩️ [StreamVix] Skipping AnimeUnity stream`);
+                        return !isAnimeUnity;
+                    });
+
+                    console.log(`⛩️ [StreamVix] ${filteredSvStreams.length} streams after filtering`);
+
                     const animeStreams = [];
-                    for (const sv of svStreams) {
+                    for (const sv of filteredSvStreams) {
                         const sourceName = sv.name || 'StreamVix';
                         const langMatch = sv.title?.match(/🗣\s*\[([^\]]+)\]/);
                         const lang = langMatch ? langMatch[1] : '';
@@ -11065,32 +11074,7 @@ async function handleStream(type, id, config, workerOrigin) {
             }
         }
 
-        // 📺 StreamingCommunity: fetch direct streams for movie/series
-        if (config.streamingcommunity_enabled && (type === 'movie' || type === 'series')) {
-            try {
-                const scStreams = await fetchStreamingCommunityStreams({
-                    type,
-                    imdbId: mediaDetails?.imdbId || imdbId,
-                    tmdbId: mediaDetails?.tmdbId || tmdbId,
-                    season,
-                    episode
-                });
 
-                if (scStreams.length > 0) {
-                    const formatted = scStreams.map((stream) => ({
-                        name: `📺 ${stream.name || 'StreamingCommunity'}`,
-                        title: stream.title || 'StreamingCommunity',
-                        url: stream.url,
-                        behaviorHints: stream.behaviorHints || {}
-                    }));
-
-                    // Prepend StreamingCommunity streams before torrents
-                    streams = [...formatted, ...streams];
-                }
-            } catch (scErr) {
-                console.warn(`⚠️ [StreamingCommunity] Error: ${scErr.message}`);
-            }
-        }
 
         const cachedCount = streams.filter(s => s.name.includes('⚡')).length;
         const totalTime = Date.now() - startTime;
@@ -11604,12 +11588,8 @@ export default async function handler(req, res) {
                     if (hasFullIta) featureSuffix += '🇮🇹';
                     if (hasSkipIntro) featureSuffix += '⏩';
                     if (config.only_debrid_cache === true) featureSuffix += '⚡';
-                    if (hasAnime && config.streamingcommunity_enabled === true) {
-                        featureSuffix += '⛩️🍿';
-                    } else if (hasAnime) {
+                    if (hasAnime) {
                         featureSuffix += '⛩️';
-                    } else if (config.streamingcommunity_enabled === true) {
-                        featureSuffix += '🍿';
                     }
 
                     if (services.length > 0) {
