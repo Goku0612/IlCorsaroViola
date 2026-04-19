@@ -10886,10 +10886,11 @@ async function handleStream(type, id, config, workerOrigin) {
 
                     // 🔥 P2P Pack: Add fileIdx for pack torrents
                     // fileIdx tells Stremio which file in the torrent to play (0-based index)
+                    // RD/DB stores 1-based file IDs, Stremio expects 0-based → subtract 1
                     // Also set behaviorHints.filename as fallback/verification
                     if (result.fileIndex !== null && result.fileIndex !== undefined) {
-                        p2pStream.fileIdx = result.fileIndex;
-                        console.log(`🔥 [P2P Pack] Added fileIdx=${result.fileIndex} for "${cleanMainFilename || result.title.substring(0, 50)}"`);
+                        p2pStream.fileIdx = result.fileIndex - 1;
+                        console.log(`🔥 [P2P Pack] Added fileIdx=${result.fileIndex - 1} (from RD id=${result.fileIndex}) for "${cleanMainFilename || result.title.substring(0, 50)}"`);
                     }
 
                     streams.push(p2pStream);
