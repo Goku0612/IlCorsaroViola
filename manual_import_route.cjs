@@ -2099,10 +2099,15 @@ router.post('/preview-files', upload.any(), async (req, res) => {
         // 2. Check if already in DB
         const existingTorrent = await dbHelper.getTorrent(infoHash);
         if (existingTorrent) {
-            return res.status(409).json({
-                error: 'Torrent già presente nel database!',
-                detail: `Questo torrent (${infoHash}) è già stato importato.`
-            });
+            const isCustom = existingTorrent.provider === 'Custom' || existingTorrent.provider === 'Custom Manual';
+            if (!isCustom) {
+                return res.status(409).json({
+                    error: 'Torrent già presente nel database!',
+                    detail: `Questo torrent (${infoHash}) è già stato importato.`
+                });
+            }
+            // Custom/Custom Manual: allow preview for re-mapping
+            console.log(`🔄 [MANUAL] Torrent ${infoHash.substring(0, 8)} exists as ${existingTorrent.provider}, allowing preview for re-mapping`);
         }
 
         // 3. Fetch files (NO DB save)
@@ -2207,7 +2212,8 @@ router.post('/map', async (req, res) => {
                 fileIndex,
                 filePath,
                 fileSize,
-                { imdbId, season, episode }
+                { imdbId, season, episode },
+                true // allowOverride: manual mapping can reassign files between episodes
             );
 
             if (ok) updated++;
@@ -2310,11 +2316,17 @@ router.post('/add', upload.any(), async (req, res) => {
         // ✅ DUPLICATE CHECK: moved here to cover ALL methods (cache, debrid, local)
         const existingTorrent = await dbHelper.getTorrent(infoHash);
         if (existingTorrent) {
-            console.warn(`⚠️ [MANUAL] Torrent ${infoHash} already exists in DB. Skipping.`);
-            return res.status(409).json({
-                error: 'Torrent già presente nel database!',
-                detail: `Questo torrent (${infoHash}) è già stato importato.`
-            });
+            const isCustom = existingTorrent.provider === 'Custom' || existingTorrent.provider === 'Custom Manual';
+            if (!isCustom) {
+                console.warn(`⚠️ [MANUAL] Torrent ${infoHash} already exists in DB (${existingTorrent.provider}). Skipping.`);
+                return res.status(409).json({
+                    error: 'Torrent già presente nel database!',
+                    detail: `Questo torrent (${infoHash}) è già stato importato.`
+                });
+            }
+            // Custom/Custom Manual: allow re-import — clean old files first
+            console.log(`🔄 [MANUAL] Torrent ${infoHash.substring(0, 8)} exists as ${existingTorrent.provider}, cleaning old files for re-import...`);
+            await dbHelper.deleteFileInfo(infoHash);
         }
 
         console.log(`🛠️ [MANUAL] Step 2: Fetching files (Local/Cache/Debrid)...`);
