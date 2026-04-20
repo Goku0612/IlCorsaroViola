@@ -1393,11 +1393,16 @@ router.get('/', (req, res) => {
                     return;
                 }
 
-                seasonSelect.innerHTML = seasons.map(s =>
+                seasonSelect.innerHTML = '<option value="" disabled selected>-- Seleziona stagione --</option>' + seasons.map(s =>
                     \`<option value="\${s.season_number}">Stagione \${s.season_number} \u2014 \${escapeHtml(s.name)} (\${s.episode_count || 0} ep)</option>\`
                 ).join('');
 
-                await loadSeasonEpisodes(seasonSelect.value, tmdbId);
+                // Don't auto-load episodes — wait for user to pick a season
+                episodesTable.innerHTML = '<div style="color:#94a3b8; padding:10px 0;">Seleziona una stagione per iniziare.</div>';
+                autoMatchBtn.disabled = true;
+                autoMatchBtn.style.opacity = '0.5';
+                saveMappingBtn.disabled = true;
+                saveMappingBtn.style.opacity = '0.5';
             } catch (e) {
                 seasonSelect.innerHTML = '<option>Errore TMDB</option>';
                 setMappingStatus('Errore durante il caricamento stagioni.', true);
@@ -1475,6 +1480,10 @@ router.get('/', (req, res) => {
 
         seasonSelect.addEventListener('change', async () => {
             if (!lastImport || !lastImport.tmdbId) return;
+            if (!seasonSelect.value) return;
+            // Enable buttons now that a season is selected
+            autoMatchBtn.disabled = false;
+            autoMatchBtn.style.opacity = '1';
             await loadSeasonEpisodes(seasonSelect.value, lastImport.tmdbId);
         });
 
