@@ -8017,7 +8017,9 @@ async function handleStream(type, id, config, workerOrigin) {
 
                     // ✅ SANITY CHECK: Verify that file_title matches the requested episode!
                     // This catches corrupted DB entries where file_index=4 but imdb_episode=1
-                    if (type === 'series' && season && episode && finalFileTitle && finalFileIndex !== undefined) {
+                    // ⚠️ SKIP for Custom Manual: user explicitly mapped S/E, trust the DB mapping
+                    const isCustomManualEntry = (dbResult.provider || '').toLowerCase().includes('custom manual');
+                    if (!isCustomManualEntry && type === 'series' && season && episode && finalFileTitle && finalFileIndex !== undefined) {
                         const episodeNum = parseInt(episode);
                         const seasonNum = parseInt(season);
                         const parsed = packFilesHandler.parseSeasonEpisode(finalFileTitle, seasonNum);
