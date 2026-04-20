@@ -2507,7 +2507,10 @@ router.post('/add', upload.any(), async (req, res) => {
         const isMultiMoviePack = (type === 'movie' && (data.files.length > 1 || forcePackMode === 'true'));
 
         if (filesToInsert.length > 0) {
-            if (isMultiMoviePack) {
+            if (isManualMapping) {
+                // 🗂️ MANUAL MAPPING: Skip auto-parsed file insertion — /scrape/map will handle it
+                console.log(`🗂️ [MANUAL] ManualMapping=true → skipping insertEpisodeFiles (${filesToInsert.length} files). User mappings via /scrape/map.`);
+            } else if (isMultiMoviePack) {
                 // 📦 PACK FILM: Use pack_files table (same as normal enrichment flow)
                 const packFilesData = filesToInsert.map(f => ({
                     pack_hash: infoHash.toLowerCase(),
