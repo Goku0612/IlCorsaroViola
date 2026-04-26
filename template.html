@@ -699,6 +699,12 @@
                 <input id="jackett_url" placeholder="Jackett URL (es: https://jackett.your-domain.com)" type="text">
                 <input id="jackett_api_key" placeholder="Jackett API Key" type="password">
                 <input id="jackett_password" placeholder="Jackett Password (opzionale)" type="password">
+                <label
+                    style="display: flex; align-items: center; padding: 10px 12px; margin-top: 10px; background: rgba(220, 38, 38, 0.18); border: 2px solid rgba(239, 68, 68, 0.55); border-radius: 8px; cursor: pointer; color: #fecaca; font-weight: 600;">
+                    <input type="checkbox" id="jackett_only" style="width: 18px; height: 18px; margin-right: 10px; accent-color: #ef4444;">
+                    <span>🚨 USA SOLO Jackett (esclude tutti gli altri provider)</span>
+                </label>
+                <small style="color: #fca5a5; margin-top: 4px;">Se abilitato, mostra solo i risultati provenienti da Jackett (live + DB). Filtri, formattazione, debrid e enrichment restano attivi.</small>
             </div>
 
             <!-- COL 3: Siti di Ricerca Torrent -->
@@ -822,8 +828,16 @@
                                 <span>🆂 StremThru Torz (Esterno)</span>
                             </label>
                             <label>
+                                <input type="checkbox" id="use_meteor" checked>
+                                <span>☄️ Meteor (Esterno)</span>
+                            </label>
+                            <label>
                                 <input type="checkbox" id="use_rarbg" checked>
                                 <span>🏴 RARBG (Proxy)</span>
+                            </label>
+                            <label>
+                                <input type="checkbox" id="use_jackett" checked>
+                                <span>🔍 Jackett (richiede URL+API Key)</span>
                             </label>
                         </div>
                     </details>
@@ -839,7 +853,7 @@
                             <span>💾 Ricerca Solo DB (Ultra-veloce, no live search)</span>
                         </label>
                         <label style="background: rgba(100, 100, 200, 0.15); border-color: rgba(150, 150, 255, 0.4);">
-                            <input type="checkbox" id="use_global_cache_old" checked>
+                            <input type="checkbox" id="use_global_cache_old">
                             <span>💾 Usa Cache Globale (Ricerche più veloci, condivise)</span>
                         </label>
                         <label style="background: rgba(147, 51, 234, 0.15); border-color: rgba(147, 51, 234, 0.4);">
@@ -1161,7 +1175,9 @@
             const useMediaFusionCheckbox = document.getElementById("use_mediafusion");
             const useCometCheckbox = document.getElementById("use_comet");
             const useStremthruTorzCheckbox = document.getElementById("use_stremthru_torz");
+            const useMeteorCheckbox = document.getElementById("use_meteor");
             const useRarbgCheckbox = document.getElementById("use_rarbg");
+            const useJackettCheckbox = document.getElementById("use_jackett");
             const fullItaCheckbox = document.getElementById("full_ita");
             const dbOnlyCheckbox = document.getElementById("db_only");
             // useGlobalCacheCheckbox is declared later with other Old Style variables
@@ -1213,7 +1229,9 @@
                     useMediaFusionCheckbox,
                     useCometCheckbox,
                     useStremthruTorzCheckbox,
-                    useRarbgCheckbox
+                    useMeteorCheckbox,
+                    useRarbgCheckbox,
+                    useJackettCheckbox
                 ];
 
                 providerCheckboxes.forEach(checkbox => {
@@ -1263,7 +1281,7 @@
                 } else {
                     // In Old Style: sync with old UI checkboxes
                     hybridModeCheckbox.checked = oldHybridModeCheckbox ? oldHybridModeCheckbox.checked : false;
-                    useGlobalCacheCheckbox.checked = useGlobalCacheOldCheckbox ? useGlobalCacheOldCheckbox.checked : true;
+                    useGlobalCacheCheckbox.checked = useGlobalCacheOldCheckbox ? useGlobalCacheOldCheckbox.checked : false;
                     // Sync full_ita between views
                     if (fullItaCheckbox && fullItaCheckboxOld) {
                         fullItaCheckbox.checked = fullItaCheckboxOld.checked;
@@ -1364,6 +1382,11 @@
                         config.jackett_password = jackettPassword;
                     }
                 }
+                // Jackett Only mode (active only if creds are provided)
+                const jackettOnlyEl = document.getElementById('jackett_only');
+                if (jackettOnlyEl && jackettOnlyEl.checked && jackettUrl && jackettApiKey) {
+                    config.jackett_only = true;
+                }
 
                 // Search sites selection
                 config.use_corsaronero = useCorsaroNeroCheckbox.checked;
@@ -1374,7 +1397,9 @@
                 config.use_mediafusion = useMediaFusionCheckbox.checked;
                 config.use_comet = useCometCheckbox.checked;
                 config.use_stremthru_torz = useStremthruTorzCheckbox.checked;
+                config.use_meteor = useMeteorCheckbox.checked;
                 config.use_rarbg = useRarbgCheckbox.checked;
+                config.use_jackett = useJackettCheckbox.checked;
                 config.full_ita = fullItaCheckbox.checked;
                 config.db_only = dbOnlyCheckbox.checked;
                 config.use_global_cache = useGlobalCacheCheckbox.checked;
@@ -1438,7 +1463,9 @@
                 if (config.use_mediafusion) searchSites.push("MediaFusion");
                 if (config.use_comet) searchSites.push("Comet");
                 if (config.use_stremthru_torz) searchSites.push("StremThru Torz");
+                if (config.use_meteor) searchSites.push("Meteor");
                 if (config.use_rarbg) searchSites.push("RARBG");
+                if (config.jackett_url && config.jackett_api_key && config.use_jackett !== false) searchSites.push("Jackett");
 
                 if (searchSites.length === 0 && !config.db_only) {
                     // No search sites selected and not in DB Only mode - show error
@@ -1581,6 +1608,10 @@
                             console.log('✅ Loaded jackett_password');
                         }
                     }
+                    if (cfg.jackett_only !== undefined) {
+                        const el = document.getElementById('jackett_only');
+                        if (el) el.checked = !!cfg.jackett_only;
+                    }
 
                     // Search sites checkboxes
                     if (cfg.use_corsaronero !== undefined) {
@@ -1627,9 +1658,17 @@
                         const el = document.getElementById('use_stremthru_torz');
                         if (el) el.checked = cfg.use_stremthru_torz;
                     }
+                    if (cfg.use_meteor !== undefined) {
+                        const el = document.getElementById('use_meteor');
+                        if (el) el.checked = cfg.use_meteor;
+                    }
                     if (cfg.use_rarbg !== undefined) {
                         const el = document.getElementById('use_rarbg');
                         if (el) el.checked = cfg.use_rarbg;
+                    }
+                    if (cfg.use_jackett !== undefined) {
+                        const el = document.getElementById('use_jackett');
+                        if (el) el.checked = cfg.use_jackett;
                     }
                     if (cfg.full_ita !== undefined) {
                         const el = document.getElementById('full_ita');
@@ -1946,6 +1985,7 @@
                 useMediaFusionCheckbox.checked = true;
                 useCometCheckbox.checked = true;
                 useStremthruTorzCheckbox.checked = true;
+                useMeteorCheckbox.checked = true;
                 useRarbgCheckbox.checked = true;
 
                 // Disable Old Style (use default hybrid mode)
