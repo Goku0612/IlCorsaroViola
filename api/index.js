@@ -1,9 +1,10 @@
-// Scraper Unificato: UIndex + Il Corsaro Nero + Knaben con o senza Real-Debrid (Versione Vercel)
+// Scraper Unificato: UIndex + Il Corsaro Nero + Knaben + TorrentGalaxy + Jackett + RARBG con o senza Real-Debrid (Versione Vercel)
 
 import * as cheerio from 'cheerio';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
+import crypto from 'crypto';
 
 // ✅ AIOSTREAMS: Fuzzy matching library (CommonJS import)
 const require = createRequire(import.meta.url);
@@ -1481,7 +1482,7 @@ function applyCustomFormatter(stream, result, userConfig, serviceName = 'RD', is
             },
             addon: {
                 name: 'IlCorsaroViola',
-                version: '7.4.0',
+                version: '8.0.0',
                 presetId: preset,
                 manifestUrl: null
             },
@@ -2684,6 +2685,12 @@ let torrentGalaxyCircuitBreakerUntil = 0;
 let uindexTimeoutCount = 0;
 let uindexCircuitBreakerUntil = 0;
 
+// Global circuit breaker for Jackettio - resets every 30 seconds
+const JACKETTIO_TIMEOUT_FIRST = 50000; // 50s first attempt (Jackett AggregateSearch can take 40+ seconds)
+const JACKETTIO_TIMEOUT_RETRY = 25000; // 25s subsequent attempts
+let jackettioTimeoutCount = 0;
+let jackettioCircuitBreakerUntil = 0;
+
 // Categorie Knaben
 const KnabenCategory = {
     TV: 2000000,
@@ -3287,7 +3294,31 @@ class Jackettio {
                 headers['Authorization'] = `Basic ${btoa(`api:${this.password}`)}`;
             }
 
-            const response = await fetch(url, { headers });
+            // ⏱️ Timeout + AbortController (avoid blocking the whole search if Jackett is slow)
+            const timeoutMs = jackettioTimeoutCount === 0 ? JACKETTIO_TIMEOUT_FIRST : JACKETTIO_TIMEOUT_RETRY;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+            let response;
+            try {
+                response = await fetch(url, { headers, signal: controller.signal });
+            } catch (fetchErr) {
+                clearTimeout(timeoutId);
+                if (fetchErr.name === 'AbortError') {
+                    jackettioTimeoutCount++;
+                    console.warn(`⚠️ [Jackettio] Timeout #${jackettioTimeoutCount} after ${timeoutMs}ms`);
+                    if (jackettioTimeoutCount >= 2) {
+                        jackettioCircuitBreakerUntil = Date.now() + 30000;
+                        console.warn(`🔴 [Jackettio] Circuit breaker ACTIVATED - Jackett disabled for 30 seconds`);
+                    }
+                    return [];
+                }
+                throw fetchErr;
+            }
+            clearTimeout(timeoutId);
+
+            // Reset timeout counter on successful response
+            jackettioTimeoutCount = 0;
 
             if (!response.ok) {
                 console.error(`❌ [Jackettio] API error: ${response.status} ${response.statusText}`);
@@ -3317,18 +3348,144 @@ class Jackettio {
             console.log(`🔍 [Jackettio] Found ${results.length} raw results.`);
 
             // Parse Jackett results to our standard format
-            const streams = results.map(result => {
-                // Jackett può restituire sia magnet che torrent file
-                let magnetLink = result.MagnetUri || result.magneturl || result.Link;
+            const TRACKERS = [
+                'udp://tracker.opentrackr.org:1337/announce',
+                'udp://tracker.openbittorrent.com:6969/announce',
+                'udp://exodus.desync.com:6969/announce',
+                'udp://tracker.torrent.eu.org:451/announce',
+                'udp://open.stealth.si:80/announce',
+            ];
 
-                // Se è un .torrent file, prova a estrarre l'hash
+            const buildMagnet = (hash, title) => {
+                const dn = encodeURIComponent(title || '');
+                const tr = TRACKERS.map(t => `&tr=${encodeURIComponent(t)}`).join('');
+                return `magnet:?xt=urn:btih:${hash.toLowerCase()}&dn=${dn}${tr}`;
+            };
+
+            const resolveJackettLink = async (jackettLink) => {
+                // Jackett /dl/ endpoints often 302 redirect to magnet: URIs.
+                // Read Location header without following to capture the magnet.
+                try {
+                    const r = await fetch(jackettLink, { redirect: 'manual' });
+                    const loc = r.headers.get('location') || '';
+                    if (loc.startsWith('magnet:')) return loc;
+                } catch (e) {
+                    // ignore - we'll skip this entry
+                }
+                return null;
+            };
+
+            // 🔑 Compute infohash from a .torrent (bencoded) buffer
+            // Minimal bencode walker: find the 'info' dict and SHA1 its raw bytes
+            const infoHashFromTorrentBuffer = (buf) => {
+                try {
+                    // Find pattern "4:info" then walk the following dict
+                    const needle = Buffer.from('4:info');
+                    let idx = -1;
+                    for (let i = 0; i < buf.length - 6; i++) {
+                        if (buf[i] === 0x34 /*4*/ && buf[i+1] === 0x3a /*:*/ &&
+                            buf[i+2] === 0x69 /*i*/ && buf[i+3] === 0x6e /*n*/ &&
+                            buf[i+4] === 0x66 /*f*/ && buf[i+5] === 0x6f /*o*/) {
+                            idx = i;
+                            break;
+                        }
+                    }
+                    if (idx < 0) return null;
+                    let p = idx + 6; // start of the value (must be 'd')
+                    if (buf[p] !== 0x64 /*d*/) return null;
+
+                    // Walk bencode value starting at p, return end index (inclusive)
+                    const walk = (start) => {
+                        const c = buf[start];
+                        if (c === 0x69 /*i*/) { // integer i...e
+                            let e = start + 1;
+                            while (e < buf.length && buf[e] !== 0x65 /*e*/) e++;
+                            return e;
+                        }
+                        if (c === 0x6c /*l*/ || c === 0x64 /*d*/) { // list or dict
+                            let pos = start + 1;
+                            while (pos < buf.length && buf[pos] !== 0x65 /*e*/) {
+                                if (c === 0x64) {
+                                    // dict: key (string), value (any)
+                                    pos = walk(pos) + 1; // key
+                                }
+                                pos = walk(pos) + 1; // value (or list element)
+                            }
+                            return pos; // position of 'e'
+                        }
+                        // bytestring "<len>:<bytes>"
+                        let lenEnd = start;
+                        while (lenEnd < buf.length && buf[lenEnd] !== 0x3a /*:*/) lenEnd++;
+                        const len = parseInt(buf.slice(start, lenEnd).toString('ascii'), 10);
+                        return lenEnd + len; // last byte of the string
+                    };
+                    const end = walk(p); // position of dict's 'e'
+                    const infoBytes = buf.slice(p, end + 1);
+                    return crypto.createHash('sha1').update(infoBytes).digest('hex');
+                } catch (e) {
+                    return null;
+                }
+            };
+
+            const fetchHashFromJackettDl = async (jackettLink) => {
+                try {
+                    const r = await fetch(jackettLink, { redirect: 'manual' });
+                    // 302 with magnet
+                    const loc = r.headers.get('location') || '';
+                    if (loc.startsWith('magnet:')) {
+                        const m = loc.match(/btih:([a-f0-9]{40})/i);
+                        if (m) return { hash: m[1].toLowerCase(), magnet: loc };
+                    }
+                    // 200 with .torrent bytes
+                    const ct = (r.headers.get('content-type') || '').toLowerCase();
+                    if (r.ok && (ct.includes('bittorrent') || ct.includes('octet-stream'))) {
+                        const ab = await r.arrayBuffer();
+                        const hash = infoHashFromTorrentBuffer(Buffer.from(ab));
+                        if (hash) return { hash, magnet: null };
+                    }
+                } catch (e) {
+                    // ignore
+                }
+                return null;
+            };
+
+            const streamsRaw = await Promise.all(results.map(async (result) => {
+                const title = result.Title || result.title || '';
+
+                // 1) Direct magnet from torznab attrs
+                let magnetLink = result.MagnetUri || result.magneturl;
+                let infoHash = result.InfoHash || result.infohash || null;
+
+                // 2) If we have only an infoHash, build a magnet
+                if (!magnetLink && infoHash && /^[a-f0-9]{40}$/i.test(infoHash)) {
+                    magnetLink = buildMagnet(infoHash, title);
+                }
+
+                // 3) Maybe Link itself IS a magnet
+                if (!magnetLink && result.Link && result.Link.startsWith('magnet:')) {
+                    magnetLink = result.Link;
+                }
+
+                // 4) Fallback: follow Jackett /dl/ redirect → magnet
+                if (!magnetLink && result.Link && /\/dl\//.test(result.Link)) {
+                    magnetLink = await resolveJackettLink(result.Link);
+                }
+
+                // 5) Final fallback: fetch the .torrent from Jackett /dl/ and compute infohash
+                if (!magnetLink && result.Link && /\/dl\//.test(result.Link)) {
+                    const dl = await fetchHashFromJackettDl(result.Link);
+                    if (dl) {
+                        infoHash = dl.hash;
+                        magnetLink = dl.magnet || buildMagnet(dl.hash, title);
+                    }
+                }
+
                 if (!magnetLink || !magnetLink.startsWith('magnet:')) {
-                    console.log(`⚠️ [Jackettio] Skipping non-magnet result: ${result.Title || result.title || 'Unknown'}`);
+                    console.log(`⚠️ [Jackettio] Skipping non-magnet result: ${title}`);
                     return null;
                 }
 
-                const title = result.Title || result.title || '';
-                const infoHash = extractInfoHash(magnetLink);
+                if (!infoHash) infoHash = extractInfoHash(magnetLink);
                 if (!infoHash) {
                     console.log(`⚠️ [Jackettio] Failed to extract hash from: ${title}`);
                     return null;
@@ -3366,7 +3523,8 @@ class Jackettio {
                     filename: title,
                     quality: extractQuality(title),
                     size: sizeStr,
-                    source: 'Jackettio',
+                    source: result.Indexer ? `Jackett (${result.Indexer})` : 'Jackett',
+                    indexer: result.Indexer || null,
                     seeders: seeders,
                     leechers: leechers,
                     infoHash: infoHash,
@@ -3374,7 +3532,9 @@ class Jackettio {
                     pubDate: result.PublishDate || result.publishDate || new Date().toISOString(),
                     categories: [outputCategory]
                 };
-            }).filter(Boolean);
+            }));
+
+            const streams = streamsRaw.filter(Boolean);
 
             console.log(`🔍 [Jackettio] Successfully parsed ${streams.length} ${italianOnly ? 'ITALIAN ' : ''}streams.`);
             return streams;
@@ -3401,19 +3561,25 @@ class Jackettio {
                     Size: parseInt($enclosure.attr('length')) || 0,
                     PublishDate: $item.find('pubDate').text(),
                     CategoryDesc: $item.find('category').text(),
+                    Indexer: ($item.find('jackettindexer').text() || '').trim() || null,
                 };
 
                 // Extract torznab attributes
                 $item.find('torznab\\:attr, attr').each((j, attr) => {
                     const $attr = $(attr);
-                    const name = $attr.attr('name');
+                    const name = ($attr.attr('name') || '').toLowerCase();
                     const value = $attr.attr('value');
 
                     if (name === 'magneturl') result.MagnetUri = value;
+                    if (name === 'infohash') result.InfoHash = value;
                     if (name === 'seeders') result.Seeders = parseInt(value) || 0;
                     if (name === 'peers') result.Peers = parseInt(value) || 0;
                     if (name === 'size') result.Size = parseInt(value) || result.Size;
                 });
+
+                // Some indexers expose infohash as a top-level <infohash> element
+                const ih = $item.find('infohash, infoHash, info_hash').first().text();
+                if (ih && !result.InfoHash) result.InfoHash = ih.trim();
 
                 items.push(result);
             });
@@ -3430,6 +3596,12 @@ class Jackettio {
 async function fetchJackettioData(searchQuery, type = 'movie', jackettioInstance = null) {
     if (!jackettioInstance) {
         console.log('⚠️ [Jackettio] Instance not configured, skipping.');
+        return [];
+    }
+
+    // 🔴 Circuit breaker: skip if Jackettio has been failing
+    if (Date.now() < jackettioCircuitBreakerUntil) {
+        if (DEBUG_MODE) console.log(`⚠️ [Jackettio] Circuit breaker active - skipping search for "${searchQuery}"`);
         return [];
     }
 
@@ -6677,15 +6849,21 @@ async function handleStream(type, id, config, workerOrigin) {
 
             // 💾 DB Only Mode: Query ALL providers in DB (ignore config selections)
             if (config.db_only) {
-                selectedProviders = ['corsaro', 'knaben', 'torrentgalaxy', 'uindex', 'rarbg', 'rd_cache', 'pack-handler', 'Custom', 'torrentio', 'mediafusion', 'comet'];
+                selectedProviders = ['corsaro', 'knaben', 'torrentgalaxy', 'uindex', 'rarbg', 'rd_cache', 'pack-handler', 'Custom', 'torrentio', 'mediafusion', 'comet', 'jackett'];
                 if (DEBUG_MODE) console.log(`💾 [DB Only] Querying ALL providers in database`);
+            } else if (config.jackett_only) {
+                // 🔍 Jackett Only Mode: Only Jackett results (DB + live)
+                selectedProviders = ['jackett'];
+                console.log(`🔍 [Jackett Only] Querying ONLY Jackett provider in database`);
             } else {
                 if (config.use_corsaronero !== false) selectedProviders.push('corsaro');  // Matches CorsaroNero, ilcorsaronero
                 if (config.use_knaben !== false) selectedProviders.push('knaben');        // Matches Knaben (1337x), etc.
                 if (config.use_torrentgalaxy === true) selectedProviders.push('torrentgalaxy');
                 if (config.use_uindex !== false) selectedProviders.push('uindex');
                 if (config.use_stremthru_torz !== false) selectedProviders.push('stremthru_torz');
+                if (config.use_meteor !== false) selectedProviders.push('meteor');
                 if (config.use_rarbg === true) selectedProviders.push('rarbg');
+                if (config.use_jackett !== false) selectedProviders.push('jackett');
                 // Always include rd_cache (personal torrents), pack-handler, and Custom (manually imported)
                 selectedProviders.push('rd_cache', 'pack-handler', 'Custom');
                 // External addons: Check individual toggles
@@ -7104,6 +7282,19 @@ async function handleStream(type, id, config, workerOrigin) {
                 }
             }
 
+            // 🔍 JACKETT ONLY MODE: defensive post-filter
+            // Some DB queries (searchPacksByImdbId, searchPacksByTitle) and the hardcoded
+            // 'Custom'/'Custom Manual'/'vip' bypass in searchByImdbId/Tmdb can leak non-Jackett rows.
+            // Strip everything that isn't Jackett here.
+            if (config.jackett_only && Array.isArray(dbResults) && dbResults.length > 0) {
+                const before = dbResults.length;
+                dbResults = dbResults.filter(r => {
+                    const provider = (r.provider || '').toLowerCase();
+                    return provider.includes('jackett');
+                });
+                console.log(`🔍 [Jackett Only] Post-filter dbResults: ${before} → ${dbResults.length}`);
+            }
+
             // ✅ 3-TIER STRATEGY: Check if we should skip live search FOR CORSARO (Tier 1/2 -> Tier 3)
             // Knaben and UIndex will ALWAYS run if enabled (Parallel Flow)
             let skipLiveSearch = dbResults.length > 0;
@@ -7182,6 +7373,27 @@ async function handleStream(type, id, config, workerOrigin) {
             else if (useHybridMode) {
                 skipLiveSearch = true;
                 if (DEBUG_MODE) console.log(`🚀 [Hybrid] Mode enabled - skipping live search for fast response (background scrape will follow)`);
+            }
+            // 🔍 JACKETT ONLY: always run Jackett live search (DB cache is just a head-start, not a replacement)
+            // Triggered by either explicit jackett_only flag OR when Jackett is the only enabled live source
+            else if (config.jackett_url && config.jackett_api_key && config.use_jackett !== false) {
+                const jackettOnlyExplicit = config.jackett_only === true;
+                const noOtherLiveSources = (
+                    config.use_corsaronero === false &&
+                    config.use_uindex === false &&
+                    config.use_knaben === false &&
+                    config.use_torrentgalaxy !== true &&
+                    config.use_torrentio === false &&
+                    config.use_mediafusion === false &&
+                    config.use_comet === false &&
+                    config.use_stremthru_torz === false &&
+                    config.use_meteor === false &&
+                    config.use_rarbg === false
+                );
+                if (jackettOnlyExplicit || noOtherLiveSources) {
+                    skipLiveSearch = false;
+                    if (DEBUG_MODE) console.log(`🔍 [Jackett Live Forced] ${jackettOnlyExplicit ? 'jackett_only flag' : 'Jackett is only enabled source'} — running live search regardless of ${dbResults.length} DB cached results`);
+                }
             }
 
             if (skipLiveSearch) {
@@ -7354,18 +7566,23 @@ async function handleStream(type, id, config, workerOrigin) {
             let totalQueries = 0;
 
             // Check which sites are enabled (default to all if not specified)
-            const useUIndex = config.use_uindex !== false;
-            const useCorsaroNero = config.use_corsaronero !== false;
-            const useKnaben = config.use_knaben !== false;
-            const useTorrentGalaxy = config.use_torrentgalaxy === true; // Default OFF (false) for new feature
-            const globalExternalEnabled = config.use_external_addons !== false;
+            // 🔍 Jackett Only: forcibly disable every other live scraper
+            const jackettOnly = config.jackett_only === true;
+            const useUIndex = !jackettOnly && config.use_uindex !== false;
+            const useCorsaroNero = !jackettOnly && config.use_corsaronero !== false;
+            const useKnaben = !jackettOnly && config.use_knaben !== false;
+            const useTorrentGalaxy = !jackettOnly && config.use_torrentgalaxy === true; // Default OFF (false) for new feature
+            const useJackett = jackettOnly || config.use_jackett !== false; // Default ON (only matters if creds provided)
+            const globalExternalEnabled = !jackettOnly && config.use_external_addons !== false;
             const enabledExternalAddons = [];
             if (globalExternalEnabled) {
                 if (config.use_torrentio !== false) enabledExternalAddons.push('torrentio');
                 if (config.use_mediafusion !== false) enabledExternalAddons.push('mediafusion');
                 if (config.use_comet !== false) enabledExternalAddons.push('comet');
                 if (config.use_stremthru_torz !== false) enabledExternalAddons.push('stremthru_torz');
+                if (config.use_meteor !== false) enabledExternalAddons.push('meteor');
             }
+            if (jackettOnly) console.log(`🔍 [Jackett Only] Mode active - disabling all other scrapers`);
             if (DEBUG_MODE) {
                 console.log(`🐞 [DEBUG-EXT] Config:`, JSON.stringify(config));
                 console.log(`🐞 [DEBUG-EXT] Global: ${globalExternalEnabled}, Enabled: ${JSON.stringify(enabledExternalAddons)}`);
@@ -7376,13 +7593,15 @@ async function handleStream(type, id, config, workerOrigin) {
 
             // ✅ Initialize Jackettio if ENV vars are set
             let jackettioInstance = null;
-            if (config.jackett_url && config.jackett_api_key) {
+            if (useJackett && config.jackett_url && config.jackett_api_key) {
                 jackettioInstance = new Jackettio(
                     config.jackett_url,
                     config.jackett_api_key,
                     config.jackett_password
                 );
                 console.log('🔍 [Jackettio] Instance initialized (ITALIAN ONLY mode)');
+            } else if (!useJackett && config.jackett_url && config.jackett_api_key) {
+                console.log('🔍 [Jackettio] Disabled by user (use_jackett=false)');
             }
 
             const parallelSearchTasks = [];
@@ -7481,6 +7700,8 @@ async function handleStream(type, id, config, workerOrigin) {
                 let foundWithItalianTitleQueries = 0; // Count results from Italian title queries
                 const cleanedItalianTitle = italianTitle ? cleanTitleForSearch(italianTitle) : '';
                 const cleanedEnglishTitle = cleanTitleForSearch(mediaDetails.title || '');
+                // 🔍 Jackett is slow (AggregateSearch) → call it ONCE per request, not per-query
+                let jackettCalled = false;
 
                 for (const query of finalSearchQueries) {
                     // 🛑 EARLY EXIT: If we found good results with Italian title queries, skip English fallback
@@ -7561,11 +7782,19 @@ async function handleStream(type, id, config, workerOrigin) {
                     }
 
                     // Jackettio (skip in db_only or hybrid mode)
-                    if (jackettioInstance && !skipLiveSearch) {
+                    // ⚠️ Jackett's /indexers/all/ endpoint (AggregateSearch) is intrinsically slow
+                    //   (cycles all configured indexers). Call it ONCE per request with the best query.
+                    if (jackettioInstance && !skipLiveSearch && !jackettCalled) {
+                        // Pick the most informative query: prefer Italian title + year, else original/english
+                        const jackettQuery = (cleanedItalianTitle && mediaDetails.year)
+                            ? `${italianTitle} ${mediaDetails.year}`
+                            : (italianTitle || originalTitle || mediaDetails.title || query);
+                        if (DEBUG_MODE) console.log(`🔍 [Jackettio] Single-shot query: "${jackettQuery}"`);
                         searchPromises.push({
                             name: 'Jackettio',
-                            promise: fetchJackettioData(query, searchType, jackettioInstance)
+                            promise: fetchJackettioData(jackettQuery, searchType, jackettioInstance)
                         });
+                        jackettCalled = true;
                     }
 
                     if (searchPromises.length === 0) {
@@ -7629,7 +7858,7 @@ async function handleStream(type, id, config, workerOrigin) {
             }
 
             // 4️⃣ TASK: RARBG (skip in db_only or hybrid mode)
-            if (config.use_rarbg !== false && !config.db_only && !useHybridMode) {
+            if (!jackettOnly && config.use_rarbg !== false && !config.db_only && !useHybridMode) {
                 parallelSearchTasks.push(async () => {
                     // 🇮🇹 PRIORITY: Use Italian title if available, otherwise original name, then English title
                     const rarbgQuery = italianTitle || mediaDetails.originalName || mediaDetails.title;
@@ -7665,6 +7894,20 @@ async function handleStream(type, id, config, workerOrigin) {
             if (DEBUG_MODE) console.log(`🚀 Executing ${parallelSearchTasks.length} search tasks in parallel...`);
             await Promise.allSettled(parallelSearchTasks.map(task => task()));
             if (DEBUG_MODE) console.log(`🏁 All parallel search tasks completed.`);
+
+            // 🔍 JACKETT ONLY: defensive cleanup — wipe every provider bucket except Jackettio
+            if (config.jackett_only) {
+                const droppedCounts = {};
+                for (const key of Object.keys(rawResultsByProvider)) {
+                    if (key !== 'Jackettio' && rawResultsByProvider[key].length > 0) {
+                        droppedCounts[key] = rawResultsByProvider[key].length;
+                        rawResultsByProvider[key] = [];
+                    }
+                }
+                if (Object.keys(droppedCounts).length > 0) {
+                    console.log(`🔍 [Jackett Only] Dropped non-Jackett raw results:`, droppedCounts);
+                }
+            }
 
             // Merge finale
             const allRawResults = [
@@ -8542,7 +8785,9 @@ async function handleStream(type, id, config, workerOrigin) {
                             }
                             if (!cleanTitle || cleanTitle.length < 3) cleanTitle = r.title || r.websiteTitle || 'Unknown';
                             const providerCandidate = r.provider || r.source || r.externalAddon || 'unknown';
-                            const cleanProvider = providerCandidate.replace(/^[^a-zA-Z0-9]+/, '').trim();
+                            let cleanProvider = providerCandidate.replace(/^[^a-zA-Z0-9]+/, '').trim();
+                            // 🔍 Jackett: never store the indexer suffix in DB - just "Jackett"
+                            if (/^jackett\b/i.test(cleanProvider)) cleanProvider = 'Jackett';
                             return ({
                                 info_hash: r.infoHash.toLowerCase(),  // snake_case for DB
                                 title: cleanTitle,
@@ -11588,10 +11833,15 @@ export default async function handler(req, res) {
                     const hasSkipIntro = config.introskip_enabled === true;
                     const hasDbOnly = config.db_only === true;
                     const hasAnime = config.anime_enabled === true;
+                    const hasJackett = (
+                        config.jackett_only === true ||
+                        (config.use_jackett !== false && !!config.jackett_url && !!config.jackett_api_key)
+                    );
 
                     // Build feature suffix: ⚡ for DB Only, 🇮🇹 for FULL ITA, ⏩ for Skip Intro
                     let featureSuffix = '';
                     if (hasDbOnly) featureSuffix += '⚡';
+                    if (hasJackett) featureSuffix += '🧥';
                     if (hasFullIta) featureSuffix += '🇮🇹';
                     if (hasSkipIntro) featureSuffix += '⏩';
                     if (config.only_debrid_cache === true) featureSuffix += '⚡';
@@ -11624,7 +11874,7 @@ export default async function handler(req, res) {
 
             const manifest = {
                 id: 'community.ilcorsaroviola.ita',
-                version: '7.4.0',
+                version: '8.0.0',
                 name: addonName,
                 description: 'Streaming da UIndex, CorsaroNero DB local, Knaben e Jackettio con o senza Real-Debrid, Torbox e Alldebrid.',
                 logo: 'https://i.imgur.com/kZK4KKS.png',
@@ -14112,7 +14362,7 @@ export default async function handler(req, res) {
             const health = {
                 status: 'OK',
                 addon: 'IlCorsaroViola',
-                version: '7.4.0',
+                version: '8.0.0',
                 uptime: Date.now(),
                 cache: {
                     entries: cache.size,
