@@ -13,6 +13,7 @@ const PROVIDER_PRIORITY_MAP = {
   mediafusion: 2,
   corsaro: 3,
   comet: 4,
+  jackett: 5,
   'pack-handler': 50,  // ✅ Very low priority - any real provider should overwrite
   rd_cache: 99,
   tb_cache: 99
@@ -82,6 +83,7 @@ function providerPrioritySQL(columnRef) {
                 WHEN ${columnRef} ILIKE '%mediafusion%' THEN 2
                 WHEN ${columnRef} ILIKE '%corsaro%' THEN 3
                 WHEN ${columnRef} ILIKE '%comet%' THEN 4
+                WHEN ${columnRef} ILIKE '%jackett%' THEN 5
                 WHEN ${columnRef} = 'pack-handler' THEN 50
                 WHEN ${columnRef} IN ('rd_cache', 'tb_cache') THEN 99
                 ELSE 10
