@@ -10396,7 +10396,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     // New Name Format: IL 🏴‍☠️ 🔮 [👑] [⚡] \n [Quality]
                     let badgePrefix = 'IL 🏴‍☠️ 🔮';
 
-                    if (result.externalAddon) {
+                    if (result.externalAddon && result.externalAddon !== 'meteor') {
                         const addonName = EXTERNAL_ADDONS[result.externalAddon] ? EXTERNAL_ADDONS[result.externalAddon].name : result.externalAddon;
                         badgePrefix = `${result.sourceEmoji || '🔗'} ${addonName}`;
                     }
@@ -10497,7 +10497,10 @@ async function handleStream(type, id, config, workerOrigin) {
                     let providerName = result.source;
 
                     // For external addons, display ONLY the specific provider in parentheses
-                    if (result.externalAddon && result.externalProvider) {
+                    // Exception: Meteor is treated as native — show as "💾 Meteor ☄️"
+                    if (result.externalAddon === 'meteor') {
+                        providerName = '💾 Meteor ☄️';
+                    } else if (result.externalAddon && result.externalProvider) {
                         providerName = `(${result.externalProvider})`;
                     }
 
@@ -10632,7 +10635,7 @@ async function handleStream(type, id, config, workerOrigin) {
 
                     // Badge uses addon name for external addons
                     let badgePrefix = 'IL 🏴‍☠️ 🔮';
-                    if (result.externalAddon) {
+                    if (result.externalAddon && result.externalAddon !== 'meteor') {
                         const addonName = EXTERNAL_ADDONS[result.externalAddon] ? EXTERNAL_ADDONS[result.externalAddon].name : result.externalAddon;
                         badgePrefix = `${result.sourceEmoji || '🔗'} ${addonName}`;
                     }
@@ -10737,7 +10740,10 @@ async function handleStream(type, id, config, workerOrigin) {
                     let providerName = result.source;
 
                     // For external addons, display ONLY the specific provider in parentheses
-                    if (result.externalAddon && result.externalProvider) {
+                    // Exception: Meteor is treated as native — show as "💾 Meteor ☄️"
+                    if (result.externalAddon === 'meteor') {
+                        providerName = '💾 Meteor ☄️';
+                    } else if (result.externalAddon && result.externalProvider) {
                         providerName = `(${result.externalProvider})`;
                     }
 
@@ -10827,7 +10833,7 @@ async function handleStream(type, id, config, workerOrigin) {
 
                     // Badge uses addon name for external addons
                     let badgePrefix = 'IL 🏴‍☠️ 🔮';
-                    if (result.externalAddon) {
+                    if (result.externalAddon && result.externalAddon !== 'meteor') {
                         const addonName = EXTERNAL_ADDONS[result.externalAddon] ? EXTERNAL_ADDONS[result.externalAddon].name : result.externalAddon;
                         badgePrefix = `${result.sourceEmoji || '🔗'} ${addonName}`;
                     }
@@ -10930,7 +10936,10 @@ async function handleStream(type, id, config, workerOrigin) {
                     let providerName = result.source;
 
                     // For external addons, display ONLY the specific provider in parentheses
-                    if (result.externalAddon && result.externalProvider) {
+                    // Exception: Meteor is treated as native — show as "💾 Meteor ☄️"
+                    if (result.externalAddon === 'meteor') {
+                        providerName = '💾 Meteor ☄️';
+                    } else if (result.externalAddon && result.externalProvider) {
                         providerName = `(${result.externalProvider})`;
                     }
 
@@ -11001,7 +11010,7 @@ async function handleStream(type, id, config, workerOrigin) {
 
                     // Badge uses addon name for external addons
                     let badgePrefix = 'IL 🏴‍☠️ 🔮';
-                    if (result.externalAddon) {
+                    if (result.externalAddon && result.externalAddon !== 'meteor') {
                         const addonName = EXTERNAL_ADDONS[result.externalAddon] ? EXTERNAL_ADDONS[result.externalAddon].name : result.externalAddon;
                         badgePrefix = `${result.sourceEmoji || '🔗'} ${addonName}`;
                     }
@@ -11095,7 +11104,10 @@ async function handleStream(type, id, config, workerOrigin) {
                     let providerName = result.source;
 
                     // For external addons, display ONLY the specific provider in parentheses
-                    if (result.externalAddon && result.externalProvider) {
+                    // Exception: Meteor is treated as native — show as "💾 Meteor ☄️"
+                    if (result.externalAddon === 'meteor') {
+                        providerName = '💾 Meteor ☄️';
+                    } else if (result.externalAddon && result.externalProvider) {
                         providerName = `(${result.externalProvider})`;
                     }
 
