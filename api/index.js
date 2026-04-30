@@ -8282,7 +8282,19 @@ async function handleStream(type, id, config, workerOrigin) {
                     const fileName = finalFileTitle || undefined;
 
                     // Build magnet link
-                    const magnetLink = `magnet:?xt=urn:btih:${dbResult.info_hash}&dn=${encodeURIComponent(torrentTitle)}`;
+                    // ⚠️ DB stores only info_hash — il magnet ricostruito è "trackerless".
+                    // Per Debrid (RD/TB/AD) non importa, ma per P2P serve almeno la lista
+                    // dei tracker pubblici standard, altrimenti il client Stremio non
+                    // riesce a trovare peer (solo DHT non basta) e lo stream non parte.
+                    const DB_TRACKERS = [
+                        'udp://tracker.opentrackr.org:1337/announce',
+                        'udp://tracker.openbittorrent.com:6969/announce',
+                        'udp://exodus.desync.com:6969/announce',
+                        'udp://tracker.torrent.eu.org:451/announce',
+                        'udp://open.stealth.si:80/announce',
+                    ];
+                    const trParams = DB_TRACKERS.map(t => `&tr=${encodeURIComponent(t)}`).join('');
+                    const magnetLink = `magnet:?xt=urn:btih:${dbResult.info_hash}&dn=${encodeURIComponent(torrentTitle)}${trParams}`;
 
                     // DEBUG: Log what we're adding
                     if (DEBUG_MODE) console.log(`🔍 [DB ADD] Adding: hash=${dbResult.info_hash.substring(0, 8)}, title="${torrentTitle.substring(0, 50)}...", size=${formatBytes(displaySize || 0)}${finalFileSize ? ' (episode)' : ' (pack)'}, seeders=${dbResult.seeders || 0}`);
