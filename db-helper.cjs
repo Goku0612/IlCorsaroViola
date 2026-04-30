@@ -161,10 +161,15 @@ async function searchByImdbId(imdbId, type = null, providers = null) {
         is_torrent_pack
       FROM torrents
       WHERE imdb_id = $1
+        AND provider != 'Custom Manual'
     `;
 
     const params = [imdbId];
     let paramIndex = 2;
+
+    // ⚠️ 'Custom Manual' rows are excluded above: they are episode-specific mappings
+    // stored in the `files` table and must only be returned by searchEpisodeFiles().
+    // Otherwise a manual S13E07 mapping would leak into every episode of the series.
 
     // ✅ FIX: Include 'unknown' type to catch RD cache torrents that don't have type set
     if (type) {
@@ -231,10 +236,13 @@ async function searchByTmdbId(tmdbId, type = null, providers = null) {
         is_torrent_pack
       FROM torrents
       WHERE tmdb_id = $1
+        AND provider != 'Custom Manual'
     `;
 
     const params = [tmdbId];
     let paramIndex = 2;
+
+    // ⚠️ 'Custom Manual' rows are excluded above (see searchByImdbId for rationale).
 
     if (type) {
       query += ` AND type = $${paramIndex}`;
@@ -1283,6 +1291,7 @@ async function searchByTitleFTS(cleanedTitle, type = null, year = null) {
         ts_rank(title_vector, plainto_tsquery('italian', $1)) as rank
       FROM torrents
       WHERE title_vector @@ plainto_tsquery('italian', $1)
+        AND provider != 'Custom Manual'
     `;
 
     const params = [cleanedTitle];
