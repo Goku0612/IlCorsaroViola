@@ -8302,7 +8302,7 @@ async function handleStream(type, id, config, workerOrigin) {
                     // Add to raw results with high priority
                     allRawResults.push({
                         title: torrentTitle,
-                        infoHash: dbResult.info_hash.toUpperCase(),
+                        infoHash: dbResult.info_hash.toLowerCase(),
                         magnetLink: magnetLink,
                         seeders: dbResult.seeders || 0,
                         leechers: 0,
